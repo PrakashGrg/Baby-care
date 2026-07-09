@@ -66,3 +66,48 @@ class DailySummaryView(APIView):
             'average_humidity_percent': round(sensor_averages['avg_humidity'], 1) if sensor_averages['avg_humidity'] else None,
             'sleep_transitions': sleep_transitions,
         })
+        
+class EventTimelineView(APIView):
+    """
+    Returns a unified, chronological feed of motion, cry, and sleep events
+    for a room, most recent first.
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request):
+        room_name = request.query_params.get('room_name', 'default')
+        limit = int(request.query_params.get('limit', 50))
+
+        events = []
+
+        for e in MotionEvent.objects.filter(room_name=room_name).order_by('-detected_at')[:limit]:
+            events.append({
+                'type': 'motion',
+                'message': 'Motion detected',
+                'timestamp': e.detected_at,
+                'value': e.motion_score,
+            })
+
+        for e in CryEvent.objects.filter(room_name=room_name).order_by('-detected_at')[:limit]:
+            events.append({
+                'type': 'cry',
+                'message': 'Crying detected',
+                'timestamp': e.detected_at,
+                'value': e.volume_level,
+            })
+
+        for e in SleepLog.objects.filter(room_name=room_name).order_by('-changed_at')[:limit]:
+            events.append({
+                'type': 'sleep',
+                'message': 'Baby fell asleep' if e.state == 'asleep' else 'Baby woke up',
+                'timestamp': e.changed_at,
+                'value': None,
+            })
+
+        events.sort(key=lambda x: x['timestamp'], reverse=True)
+        events = events[:limit]
+
+        for e in events:
+            e['timestamp'] = e['timestamp'].isoformat()
+
+        return Response(events)
