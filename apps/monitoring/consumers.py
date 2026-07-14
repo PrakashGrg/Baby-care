@@ -1,10 +1,15 @@
 import json
+import asyncio
+import random
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from apps.detection.motion import MotionDetector
 from apps.detection.models import MotionEvent
 from apps.audio.cry_detector import CryDetector
 from apps.audio.models import CryEvent
+from apps.sensors.models import SensorReading
+
+SENSOR_BROADCAST_INTERVAL = 5  # seconds
 
 
 class MonitorConsumer(AsyncWebsocketConsumer):
@@ -17,6 +22,7 @@ class MonitorConsumer(AsyncWebsocketConsumer):
         self.room_group_name = f'monitor_{self.room_name}'
         self.motion_detector = MotionDetector()
         self.cry_detector = CryDetector()
+        self.sensor_task = None
 
         await self.channel_layer.group_add(
             self.room_group_name,
@@ -28,12 +34,50 @@ class MonitorConsumer(AsyncWebsocketConsumer):
             'message': f'Connected to monitor room {self.room_name}'
         }))
 
+        self.sensor_task = asyncio.ensure_future(self.broadcast_sensor_loop())
+
     async def disconnect(self, close_code):
+        if self.sensor_task:
+            self.sensor_task.cancel()
         if hasattr(self, 'room_group_name'):
             await self.channel_layer.group_discard(
                 self.room_group_name,
                 self.channel_name
             )
+
+    async def broadcast_sensor_loop(self):
+        try:
+            while True:
+                await asyncio.sleep(SENSOR_BROADCAST_INTERVAL)
+
+                temperature = round(random.uniform(20.0, 26.0), 1)
+                humidity = round(random.uniform(40.0, 60.0), 1)
+
+                await self.save_sensor_reading(temperature, humidity)
+
+                await self.channel_layer.group_send(
+                    self.room_group_name,
+                    {
+                        'type': 'monitor_event',
+                        'event': {
+                            'type': 'sensor_update',
+                            'temperature': temperature,
+                            'humidity': humidity,
+                            'room': self.room_name
+                        }
+                    }
+                )
+        except asyncio.CancelledError:
+            pass
+
+    @database_sync_to_async
+    def save_sensor_reading(self, temperature, humidity):
+        SensorReading.objects.create(
+            user=self.scope['user'],
+            room_name=self.room_name,
+            temperature_celsius=temperature,
+            humidity_percent=humidity,
+        )
 
     async def receive(self, text_data):
         data = json.loads(text_data)
