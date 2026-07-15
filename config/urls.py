@@ -7,4 +7,5 @@ urlpatterns = [
     path('api/sensors/', include('apps.sensors.urls')),
     path('api/sleep/', include('apps.sleep.urls')),
     path('api/activity/', include('apps.activity.urls')),
+    path('api/baby/', include('apps.baby.urls')),
 ]

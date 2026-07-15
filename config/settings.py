@@ -34,6 +34,7 @@ INSTALLED_APPS = [
     'apps.sensors',
     'apps.sleep',
     'apps.activity',
+    'apps.baby',
 ]
 
 MIDDLEWARE = [
