@@ -26,3 +26,7 @@ class UserSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = ['id', 'username', 'email', 'role', 'phone_number', 'created_at']
+
+
+class PushTokenSerializer(serializers.Serializer):
+    token = serializers.CharField()

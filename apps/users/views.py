@@ -14,3 +14,21 @@ class MeView(APIView):
 
     def get(self, request):
         return Response(UserSerializer(request.user).data)
+    
+from .models import PushToken
+from .serializers import PushTokenSerializer
+
+
+class RegisterPushTokenView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request):
+        serializer = PushTokenSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        token = serializer.validated_data['token']
+
+        PushToken.objects.update_or_create(
+            token=token,
+            defaults={'user': request.user}
+        )
+        return Response({'status': 'registered'})
