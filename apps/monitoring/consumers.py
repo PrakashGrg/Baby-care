@@ -87,6 +87,18 @@ class MonitorConsumer(AsyncWebsocketConsumer):
             await self.handle_video_frame(data)
         elif event_type == 'audio_chunk':
             await self.handle_audio_chunk(data)
+        elif event_type == 'parent_voice':
+            await self.channel_layer.group_send(
+                self.room_group_name,
+                {
+                    'type': 'monitor_event',
+                    'event': {
+                        'type': 'parent_voice',
+                        'audio': data.get('audio'),
+                        'room': self.room_name,
+                    }
+                }
+            )
         else:
             await self.channel_layer.group_send(
                 self.room_group_name,
