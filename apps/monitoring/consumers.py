@@ -124,6 +124,8 @@ class MonitorConsumer(AsyncWebsocketConsumer):
                     'event': {
                         'type': 'motion_alert',
                         'score': result['score'],
+                        'intensity': result['intensity'],
+                        'annotated_frame': result['annotated_frame'],
                         'room': self.room_name
                     }
                 }
