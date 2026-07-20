@@ -129,6 +129,18 @@ class MonitorConsumer(AsyncWebsocketConsumer):
                 }
             )
 
+        await self.channel_layer.group_send(
+            self.room_group_name,
+            {
+                'type': 'monitor_event',
+                'event': {
+                    'type': 'frame_broadcast',
+                    'frame': frame_b64,
+                    'sender': self.channel_name,
+                }
+            }
+        )
+
     async def handle_audio_chunk(self, data):
         audio_b64 = data.get('audio')
         if not audio_b64:
