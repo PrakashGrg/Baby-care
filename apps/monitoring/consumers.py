@@ -1,15 +1,11 @@
 import json
-import asyncio
-import random
 from channels.generic.websocket import AsyncWebsocketConsumer
 from channels.db import database_sync_to_async
 from apps.detection.motion import MotionDetector
 from apps.detection.models import MotionEvent
 from apps.audio.cry_detector import CryDetector
 from apps.audio.models import CryEvent
-from apps.sensors.models import SensorReading
-
-SENSOR_BROADCAST_INTERVAL = 5  # seconds
+from apps.users.push import send_push_to_user
 
 
 class MonitorConsumer(AsyncWebsocketConsumer):
@@ -22,7 +18,6 @@ class MonitorConsumer(AsyncWebsocketConsumer):
         self.room_group_name = f'monitor_{self.room_name}'
         self.motion_detector = MotionDetector()
         self.cry_detector = CryDetector()
-        self.sensor_task = None
 
         await self.channel_layer.group_add(
             self.room_group_name,
@@ -34,50 +29,12 @@ class MonitorConsumer(AsyncWebsocketConsumer):
             'message': f'Connected to monitor room {self.room_name}'
         }))
 
-        self.sensor_task = asyncio.ensure_future(self.broadcast_sensor_loop())
-
     async def disconnect(self, close_code):
-        if self.sensor_task:
-            self.sensor_task.cancel()
         if hasattr(self, 'room_group_name'):
             await self.channel_layer.group_discard(
                 self.room_group_name,
                 self.channel_name
             )
-
-    async def broadcast_sensor_loop(self):
-        try:
-            while True:
-                await asyncio.sleep(SENSOR_BROADCAST_INTERVAL)
-
-                temperature = round(random.uniform(20.0, 26.0), 1)
-                humidity = round(random.uniform(40.0, 60.0), 1)
-
-                await self.save_sensor_reading(temperature, humidity)
-
-                await self.channel_layer.group_send(
-                    self.room_group_name,
-                    {
-                        'type': 'monitor_event',
-                        'event': {
-                            'type': 'sensor_update',
-                            'temperature': temperature,
-                            'humidity': humidity,
-                            'room': self.room_name
-                        }
-                    }
-                )
-        except asyncio.CancelledError:
-            pass
-
-    @database_sync_to_async
-    def save_sensor_reading(self, temperature, humidity):
-        SensorReading.objects.create(
-            user=self.scope['user'],
-            room_name=self.room_name,
-            temperature_celsius=temperature,
-            humidity_percent=humidity,
-        )
 
     async def receive(self, text_data):
         data = json.loads(text_data)
@@ -130,6 +87,12 @@ class MonitorConsumer(AsyncWebsocketConsumer):
                     }
                 }
             )
+            await database_sync_to_async(send_push_to_user)(
+                self.scope['user'],
+                'Motion detected',
+                f'Motion in {self.room_name}',
+                {'type': 'motion_alert', 'room': self.room_name},
+            )
 
         await self.channel_layer.group_send(
             self.room_group_name,
@@ -145,23 +108,36 @@ class MonitorConsumer(AsyncWebsocketConsumer):
 
     async def handle_audio_chunk(self, data):
         audio_b64 = data.get('audio')
-        if not audio_b64:
+        client_loud = data.get('client_loud', False)
+
+        if not audio_b64 and not client_loud:
             return
 
-        result = self.cry_detector.detect(audio_b64)
+        result = (
+            self.cry_detector.detect(audio_b64)
+            if audio_b64
+            else {'cry_detected': False, 'volume': 0}
+        )
 
-        if result['cry_detected']:
-            await self.save_cry_event(result['volume'])
+        if client_loud or result.get('cry_detected'):
+            volume = result.get('volume') or 5000
+            await self.save_cry_event(volume)
             await self.channel_layer.group_send(
                 self.room_group_name,
                 {
                     'type': 'monitor_event',
                     'event': {
                         'type': 'cry_alert',
-                        'volume': result['volume'],
+                        'volume': volume,
                         'room': self.room_name
                     }
                 }
+            )
+            await database_sync_to_async(send_push_to_user)(
+                self.scope['user'],
+                'Baby crying',
+                f'Cry detected in {self.room_name}',
+                {'type': 'cry_alert', 'room': self.room_name},
             )
 
     @database_sync_to_async
@@ -181,4 +157,11 @@ class MonitorConsumer(AsyncWebsocketConsumer):
         )
 
     async def monitor_event(self, event):
-        await self.send(text_data=json.dumps(event['event']))
+        payload = event['event']
+        # Don't echo frames back to the camera (Child Mode) device
+        if (
+            payload.get('type') == 'frame_broadcast'
+            and payload.get('sender') == self.channel_name
+        ):
+            return
+        await self.send(text_data=json.dumps(payload))

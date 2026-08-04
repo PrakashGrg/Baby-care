@@ -10,3 +10,4 @@ numpy==1.26.4
 psycopg2-binary==2.9.9
 dj-database-url==2.2.0
 whitenoise==6.7.0
+exponent-server-sdk==2.1.0
